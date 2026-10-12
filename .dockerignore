@@ -1,0 +1,32 @@
+# Keep Docker build contexts lean and secrets out of images
+.git
+.gitignore
+.venv
+venv/
+.benchmarks/
+.playwright-mcp/
+.claude/
+.github/
+__pycache__/
+*.py[cod]
+*.pyo
+*.so
+.mypy_cache/
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.eggs/
+.idea/
+.vscode/
+.DS_Store
+
+# Local data, screenshots, and env files
+data/
+screenshot.png
+.env
+*.env
+agent.md
+docs/
+CHANGELOG.md
+CLAUDE.md
