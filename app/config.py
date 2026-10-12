@@ -1,6 +1,7 @@
 """
 Config loader for the Immich Drop Uploader (Python).
-Reads ONLY from .env; there is NO runtime mutation from the UI.
+Loads infrastructure settings from .env. Runtime uploader settings are stored
+separately in the state database.
 """
 
 from __future__ import annotations

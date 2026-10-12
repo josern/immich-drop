@@ -31,6 +31,17 @@
       </div>
     </header>
 
+    <section class="card">
+      <div class="form-group">
+        <label for="uploaderName" class="form-label">Your name (optional)</label>
+        <div id="uploaderNameInputGroup" class="uploader-name-input">
+          <span id="uploaderNamePrefix" class="uploader-name-input__prefix"></span>
+          <input id="uploaderName" class="input" type="text" maxlength="200" autocomplete="name" placeholder="Enter your name" />
+        </div>
+        <p class="text-sm text-secondary mt-2">Your name alone is saved in EXIF Photographer for JPEG photos. The text shown here plus your name is saved in Immich's description.</p>
+      </div>
+    </section>
+
     <!-- Dropzone -->
     <section id="dropzone" class="dropzone">
       <div class="dropzone-desktop">
@@ -79,16 +90,31 @@
   <script>
     document.addEventListener('DOMContentLoaded', () => {
       const urlUploadSection = document.getElementById('url-upload-section');
+      const uploaderNameSection = document.getElementById('uploaderName').closest('.card');
       const initUrlUploader = () => {
         new UrlUploader('#url-upload-section', {
+          getDescription: () => document.getElementById('uploaderName')?.value.trim() || '',
           onUploadComplete: (result) => { console.log('URL upload complete:', result); },
           onError: (error) => { console.error('URL upload error:', error); }
         });
       };
 
-      fetch('/api/config')
+      fetch('/api/config', { cache: 'no-store' })
         .then(r => r.json())
         .then(data => {
+          const uploaderNameEnabled = data.uploader_name_enabled !== false;
+          if (uploaderNameSection && !uploaderNameEnabled) {
+            uploaderNameSection.classList.add('hidden');
+          }
+          const prefix = document.getElementById('uploaderNamePrefix');
+          if (prefix && uploaderNameEnabled) {
+            prefix.textContent = data.uploader_name_prefix || '';
+            prefix.classList.toggle('hidden', !prefix.textContent);
+            document.getElementById('uploaderNameInputGroup').classList.toggle(
+              'uploader-name-input--no-prefix',
+              !prefix.textContent
+            );
+          }
           const versionEl = document.getElementById('version-link');
           if (versionEl && data.version) {
             versionEl.textContent = 'immich-drop v' + data.version;

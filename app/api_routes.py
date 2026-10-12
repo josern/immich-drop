@@ -30,6 +30,12 @@ from .url_downloader import (
 from .cookie_manager import get_cookie_file_for_platform
 from .utils import detect_file_type
 from .job_manager import create_job, get_job, update_job
+from .uploader_metadata import (
+    format_uploader_description,
+    format_uploader_photographer,
+    get_uploader_name_settings,
+    write_photographer_exif,
+)
 
 
 router = APIRouter(prefix="/api", tags=["api"])
@@ -42,11 +48,13 @@ router = APIRouter(prefix="/api", tags=["api"])
 class UrlUploadRequest(BaseModel):
     url: str
     album_name: Optional[str] = None
+    description: Optional[str] = None
 
 
 class UrlBatchUploadRequest(BaseModel):
     urls: List[str]
     album_name: Optional[str] = None
+    description: Optional[str] = None
 
 
 class Base64UploadRequest(BaseModel):
@@ -54,6 +62,7 @@ class Base64UploadRequest(BaseModel):
     data: str  # base64-encoded file content
     filename: Optional[str] = None
     album_name: Optional[str] = None
+    description: Optional[str] = None
 
 
 class UploadResult(BaseModel):
@@ -62,6 +71,7 @@ class UploadResult(BaseModel):
     asset_id: Optional[str] = None
     duplicate: bool = False
     error: Optional[str] = None
+    warning: Optional[str] = None
     platform: Optional[str] = None
 
 
@@ -111,20 +121,25 @@ async def upload_to_immich(
     config,  # Config object from main app
     httpx_client: httpx.AsyncClient,  # Shared httpx client
     file_created_at: Optional[datetime] = None,
+    description: Optional[str] = None,
 ) -> UploadResult:
     """Upload a file to Immich server"""
-    sha1 = hashlib.sha1(file_content).hexdigest()
+    name_settings = get_uploader_name_settings()
+    photographer = format_uploader_photographer(description, enabled=name_settings["enabled"])
+    upload_content, metadata_warning = write_photographer_exif(file_content, photographer)
+    sha1 = hashlib.sha1(upload_content).hexdigest()
     headers = {"x-api-key": config.immich_api_key}
     outcome = await immich_client.upload_asset(
         httpx_client,
         config.normalized_base_url,
         headers,
-        file_bytes=file_content,
+        file_bytes=upload_content,
         filename=filename,
         content_type=content_type,
         checksum=sha1,
         created_at=file_created_at,
         modified_at=file_created_at,
+        description=format_uploader_description(photographer, name_settings["prefix"]),
         timeout=300.0,
     )
     if outcome.ok:
@@ -133,6 +148,13 @@ async def upload_to_immich(
             status="success",
             asset_id=outcome.asset_id,
             duplicate=outcome.status == "duplicate",
+            warning="; ".join(
+                warning for warning in (
+                    metadata_warning,
+                    f"Description could not be saved: {outcome.description_error}"
+                    if outcome.description_error else None,
+                ) if warning
+            ) or None,
         )
     return UploadResult(
         filename=filename,
@@ -205,7 +227,9 @@ def create_api_routes(config):
         job = create_job(url, url_request.album_name)
         httpx_client = request.app.state.httpx_client
 
-        asyncio.create_task(_process_url_job(job.id, url, url_request.album_name, platform, httpx_client))
+        asyncio.create_task(_process_url_job(
+            job.id, url, url_request.album_name, url_request.description, platform, httpx_client
+        ))
 
         return JobResponse(job_id=job.id, status=job.status)
 
@@ -213,6 +237,7 @@ def create_api_routes(config):
         job_id: str,
         url: str,
         album_name: Optional[str],
+        description: Optional[str],
         platform: Optional[str],
         httpx_client,
     ):
@@ -262,6 +287,7 @@ def create_api_routes(config):
                         config=config,
                         httpx_client=httpx_client,
                         file_created_at=file_created_at,
+                        description=description,
                     )
                     upload_result.platform = source_label
 
@@ -382,6 +408,7 @@ def create_api_routes(config):
                     config=config,
                     httpx_client=httpx_client,
                     file_created_at=file_created_at,
+                    description=batch_request.description,
                 )
                 upload_result.platform = source_label
 
@@ -412,6 +439,7 @@ def create_api_routes(config):
         request: Request,
         files: List[UploadFile] = File(...),
         album_name: Optional[str] = Form(None),
+        description: Optional[str] = Form(None),
     ):
         """
         Batch upload files - designed for iOS Shortcuts
@@ -439,7 +467,8 @@ def create_api_routes(config):
                 content_type=content_type,
                 config=config,
                 httpx_client=httpx_client,
-                )
+                description=description,
+            )
 
             # Add to album
             target_album = album_name or getattr(config, 'album_name', None)
@@ -465,6 +494,7 @@ def create_api_routes(config):
         request: Request,
         file: UploadFile = File(...),
         album_name: Optional[str] = Form(None),
+        description: Optional[str] = Form(None),
     ):
         """
         Upload a single file - simpler endpoint for iOS Shortcuts
@@ -480,6 +510,7 @@ def create_api_routes(config):
             content_type=content_type,
             config=config,
             httpx_client=httpx_client,
+            description=description,
         )
 
         target_album = album_name or getattr(config, 'album_name', None)
@@ -543,6 +574,7 @@ def create_api_routes(config):
             content_type=content_type,
             config=config,
             httpx_client=httpx_client,
+            description=upload_request.description,
         )
 
         target_album = upload_request.album_name or getattr(config, 'album_name', None)

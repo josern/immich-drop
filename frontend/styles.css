@@ -269,6 +269,33 @@ textarea.input { resize: vertical; font-family: var(--font-mono); font-size: 0.8
 .input::placeholder { color: var(--text-tertiary); }
 .input[readonly] { background: var(--bg); }
 
+.uploader-name-input {
+  display: flex;
+  align-items: stretch;
+}
+.uploader-name-input__prefix {
+  display: flex;
+  align-items: center;
+  max-width: 70%;
+  padding: 10px 12px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-right: 0;
+  border-radius: var(--radius) 0 0 var(--radius);
+  background: var(--bg);
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+.uploader-name-input .input {
+  flex: 1 1 0;
+  min-width: 0;
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+.uploader-name-input--no-prefix .input {
+  border-radius: var(--radius);
+}
+
 .form-group { margin-bottom: 14px; }
 .form-row {
   display: grid;

@@ -75,7 +75,11 @@
     } else if (albumInput.value.trim()) {
       albumName = albumInput.value.trim();
     }
-    var payload = { maxUses: parseInt(usage.value, 10) };
+    var payload = {
+      maxUses: parseInt(usage.value, 10),
+      uploaderNameEnabled: document.getElementById('uploaderNameEnabled').checked,
+      uploaderNamePrefix: document.getElementById('uploaderNamePrefixSetting').value
+    };
     var d = days.value.trim();
     if (d) payload.expiresDays = parseInt(d, 10);
     if (albumName) { payload.albumName = albumName; }
@@ -471,6 +475,10 @@
   fetch('/api/config')
     .then(function(r){ return r.json(); })
     .then(function(data){
+      var uploaderNameEnabled = document.getElementById('uploaderNameEnabled');
+      var uploaderNamePrefixSetting = document.getElementById('uploaderNamePrefixSetting');
+      uploaderNameEnabled.checked = data.uploader_name_enabled !== false;
+      uploaderNamePrefixSetting.value = data.uploader_name_prefix || '';
       var versionEl = document.getElementById('version-link');
       if (versionEl && data.version) versionEl.textContent = 'immich-drop v' + data.version;
     })

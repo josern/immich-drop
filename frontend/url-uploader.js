@@ -8,6 +8,7 @@ class UrlUploader {
         this.container = document.querySelector(containerSelector);
         this.onUploadComplete = options.onUploadComplete || (() => {});
         this.onError = options.onError || console.error;
+        this.getDescription = options.getDescription || (() => '');
         this.apiBase = options.apiBase || '';
 
         this.init();
@@ -158,7 +159,7 @@ class UrlUploader {
             const resp = await fetch(`${this.apiBase}/api/upload/url`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url }),
+                body: JSON.stringify({ url, description: this.getDescription() }),
             });
 
             const data = await resp.json();
@@ -182,9 +183,12 @@ class UrlUploader {
                 } else {
                     statusMsg = 'Successfully uploaded!';
                 }
+                if (uploadData.result && uploadData.result.warning) {
+                    statusMsg += ` ${uploadData.result.warning}`;
+                }
                 this.setStatus(
                     statusMsg,
-                    uploadData.result && uploadData.result.duplicate ? 'warning' : 'success'
+                    uploadData.result && (uploadData.result.duplicate || uploadData.result.warning) ? 'warning' : 'success'
                 );
                 if (uploadData.result) {
                     this.addResult(uploadData.result);
@@ -258,14 +262,18 @@ class UrlUploader {
             const resp = await fetch(`${this.apiBase}/api/upload/urls`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ urls }),
+                body: JSON.stringify({ urls, description: this.getDescription() }),
             });
 
             const data = await resp.json();
+            const descriptionWarnings = data.results.filter(result => result.warning).length;
+            const warningText = descriptionWarnings
+                ? `; ${descriptionWarnings} upload${descriptionWarnings === 1 ? '' : 's'} with metadata warnings`
+                : '';
 
             this.setStatus(
-                `Done: ${data.successful} uploaded, ${data.duplicates} duplicates, ${data.failed} failed`,
-                data.failed > 0 ? 'warning' : 'success'
+                `Done: ${data.successful} uploaded, ${data.duplicates} duplicates, ${data.failed} failed${warningText}`,
+                data.failed > 0 || descriptionWarnings > 0 ? 'warning' : 'success'
             );
 
             data.results.forEach(result => this.addResult(result));
@@ -306,6 +314,12 @@ class UrlUploader {
             platSpan.className = 'upload-item__size';
             platSpan.textContent = result.platform;
             left.appendChild(platSpan);
+        }
+        if (result.warning) {
+            const warning = document.createElement('span');
+            warning.className = 'text-sm text-secondary';
+            warning.textContent = result.warning;
+            left.appendChild(warning);
         }
 
         const badge = document.createElement('span');

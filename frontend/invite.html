@@ -34,6 +34,17 @@
       </div>
     </header>
 
+    <section id="uploaderNameSection" class="card">
+      <div class="form-group">
+        <label for="uploaderName" class="form-label">Your name (optional)</label>
+        <div id="uploaderNameInputGroup" class="uploader-name-input">
+          <span id="uploaderNamePrefix" class="uploader-name-input__prefix hidden"></span>
+          <input id="uploaderName" class="input" type="text" maxlength="200" autocomplete="name" placeholder="Enter your name" />
+        </div>
+        <p class="text-sm text-secondary mt-2">Your name alone is saved in EXIF Photographer for JPEG photos. The text shown here plus your name is saved in Immich's description.</p>
+      </div>
+    </section>
+
     <!-- Link info -->
     <section id="linkInfo" class="card">
       <div class="form-row form-row--2" style="font-size:0.8125rem;">
@@ -108,6 +119,20 @@
         var r = await fetch('/api/invite/'+token);
         var j = await r.json();
         var fmt = function(s){ return s ? new Date(s).toLocaleString() : '--'; };
+        var nameSection = document.getElementById('uploaderNameSection');
+        var namePrefix = document.getElementById('uploaderNamePrefix');
+        var nameInputGroup = document.getElementById('uploaderNameInputGroup');
+        var nameEnabled = j.uploaderNameEnabled !== false;
+        if (!nameEnabled) {
+          nameSection.classList.add('hidden');
+        } else {
+          namePrefix.textContent = j.uploaderNamePrefix || '';
+          namePrefix.classList.toggle('hidden', !namePrefix.textContent);
+          nameInputGroup.classList.toggle(
+            'uploader-name-input--no-prefix',
+            !namePrefix.textContent
+          );
+        }
         document.getElementById('liAlbum').textContent = j.albumName || j.albumId || '--';
         document.getElementById('liType').textContent = j.oneTime ? 'One-time' : (j.maxUses < 0 ? 'Indefinite' : 'Up to '+j.maxUses+' uses');
         document.getElementById('liUses').textContent = (typeof j.remaining==='number') ? String(j.remaining) : '--';
@@ -157,7 +182,7 @@
       } catch(e){}
     })();
     // Fetch version
-    fetch('/api/config')
+    fetch('/api/config', { cache: 'no-store' })
       .then(function(r){ return r.json(); })
       .then(function(data){
         var versionEl = document.getElementById('version-link');

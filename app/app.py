@@ -1,7 +1,7 @@
 """
 Immich Drop Uploader – Backend (FastAPI, simplified)
 ----------------------------------------------------
-- Serves static frontend (no settings UI)
+- Serves static frontend and admin settings UI
 - Uploads to Immich using values from .env ONLY
 - Duplicate checks (local SHA-1 DB + optional Immich bulk-check)
 - WebSocket progress per session
@@ -42,6 +42,13 @@ from app.config import Settings, load_settings
 from app import db, immich_client
 from app.immich_client import to_immich_iso
 from app.job_manager import cleanup_expired
+from app.uploader_metadata import (
+    format_uploader_description,
+    format_uploader_photographer,
+    get_invite_uploader_name_settings,
+    get_uploader_name_settings,
+    write_photographer_exif,
+)
 from version import VERSION
 
 
@@ -410,16 +417,19 @@ async def api_ping() -> dict:
     }
 
 @app.get("/api/config")
-async def api_config() -> dict:
+async def api_config() -> JSONResponse:
     """Expose minimal public configuration flags for the frontend."""
-    return {
+    uploader_name_settings = get_uploader_name_settings()
+    return JSONResponse({
         "public_upload_page_enabled": SETTINGS.public_upload_page_enabled,
         "chunked_uploads_enabled": SETTINGS.chunked_uploads_enabled,
         "chunk_size_mb": SETTINGS.chunk_size_mb,
+        "uploader_name_enabled": uploader_name_settings["enabled"],
+        "uploader_name_prefix": uploader_name_settings["prefix"],
         "version": VERSION,
         "social_media_uploads": SETTINGS.social_media_uploads,
         "test_connection_enabled": SETTINGS.test_connection_enabled,
-    }
+    }, headers={"Cache-Control": "no-store"})
 
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket) -> None:
@@ -632,6 +642,7 @@ async def immich_share_info(key: str, request: Request) -> JSONResponse:
     Mirrors the local-invite response shape so the existing invite.html page
     (same layout) renders it without any frontend changes.
     """
+    name_settings = get_uploader_name_settings()
     data, status = await fetch_immich_share(request, key)
     if status == 401:
         return JSONResponse({
@@ -651,6 +662,8 @@ async def immich_share_info(key: str, request: Request) -> JSONResponse:
             "inactiveReason": None,
             "passwordRequired": True,
             "authorized": False,
+            "uploaderNameEnabled": name_settings["enabled"],
+            "uploaderNamePrefix": name_settings["prefix"],
         })
     if not data:
         return JSONResponse({"error": "not_found"}, status_code=404)
@@ -681,6 +694,8 @@ async def immich_share_info(key: str, request: Request) -> JSONResponse:
         "inactiveReason": (None if active else reason),
         "passwordRequired": False,
         "authorized": True,
+        "uploaderNameEnabled": name_settings["enabled"],
+        "uploaderNamePrefix": name_settings["prefix"],
     })
 
 async def immich_share_auth(key: str, request: Request, provided_password: Optional[str]) -> JSONResponse:
@@ -756,6 +771,7 @@ async def process_upload(
     last_modified: Optional[int],
     invite_token: Optional[str],
     fingerprint: Optional[str],
+    description: Optional[str] = None,
 ) -> JSONResponse:
     """Dedupe-check and forward one file to Immich, streaming progress via WS."""
     size = len(raw)
@@ -775,6 +791,13 @@ async def process_upload(
     if db_lookup_device_asset(device_asset_id):
         await send_progress(session_id, item_id, "duplicate", 100, "Already uploaded from this device (local cache)")
         return JSONResponse({"status": "duplicate", "id": None}, status_code=200)
+
+    name_settings = get_invite_uploader_name_settings(invite_token)
+    photographer = format_uploader_photographer(
+        description,
+        enabled=name_settings["enabled"],
+    )
+    photo_description = format_uploader_description(photographer, name_settings["prefix"])
 
     await send_progress(session_id, item_id, "checking", 2, "Checking duplicates…")
     bulk = await immich_bulk_check([{"id": item_id, "checksum": checksum}])
@@ -801,6 +824,7 @@ async def process_upload(
     # write access); local invites keep using the app's own Immich credentials.
     upload_headers = immich_client.share_key_headers(share_key) if share_key else immich_headers(request)
 
+    upload_bytes, metadata_warning = write_photographer_exif(raw, photographer)
     safe_name = sanitize_filename(orig_name)
     await send_progress(session_id, item_id, "uploading", 0, "Uploading…")
 
@@ -811,12 +835,14 @@ async def process_upload(
         app.state.httpx_client,
         SETTINGS.normalized_base_url,
         upload_headers,
-        file_bytes=raw,
+        file_bytes=upload_bytes,
         filename=safe_name,
         content_type=content_type or "application/octet-stream",
-        checksum=checksum,
+        checksum=sha1_hex(upload_bytes),
         created_at=created_at,
         modified_at=modified_at,
+        description=photo_description,
+        description_headers=immich_headers(request),
         progress=on_progress,
         timeout=300.0,
     )
@@ -831,6 +857,11 @@ async def process_upload(
 
     asset_id = outcome.asset_id
     status = outcome.status or "created"
+    if metadata_warning:
+        logger.warning("Photographer metadata not set for %s: %s", orig_name, metadata_warning)
+        status += f" ({metadata_warning})"
+    if outcome.description_error:
+        status += f" (Uploaded, but description could not be saved: {outcome.description_error})"
     db_insert_upload(checksum, orig_name, size, device_asset_id, asset_id, created_iso)
 
     # Add to album if configured (invite overrides .env)
@@ -860,6 +891,7 @@ async def api_upload(
     last_modified: Optional[int] = Form(None),
     invite_token: Optional[str] = Form(None),
     fingerprint: Optional[str] = Form(None),
+    description: Optional[str] = Form(None),
 ):
     """Receive a file, check duplicates, forward to Immich; stream progress via WS."""
     raw = await file.read()
@@ -873,6 +905,7 @@ async def api_upload(
         last_modified=last_modified,
         invite_token=invite_token,
         fingerprint=fingerprint,
+        description=description,
     )
 
 # --------- Chunked upload endpoints ---------
@@ -984,6 +1017,7 @@ async def api_upload_chunk_init(request: Request) -> JSONResponse:
             "name": (data or {}).get("name"),
             "size": (data or {}).get("size"),
             "last_modified": (data or {}).get("last_modified"),
+            "description": (data or {}).get("description"),
             "invite_token": (data or {}).get("invite_token"),
             "content_type": (data or {}).get("content_type") or "application/octet-stream",
             "created_at": datetime.utcnow().isoformat(),
@@ -1050,6 +1084,7 @@ async def api_upload_chunk_complete(request: Request) -> JSONResponse:
     invite_token = (data or {}).get("invite_token")
     fingerprint = (data or {}).get("fingerprint")
     content_type = (data or {}).get("content_type") or "application/octet-stream"
+    description = (data or {}).get("description")
     if not item_id or not session_id:
         return JSONResponse({"error": "missing_ids"}, status_code=400)
     d = _chunk_dir(session_id, item_id)
@@ -1067,6 +1102,7 @@ async def api_upload_chunk_complete(request: Request) -> JSONResponse:
         return JSONResponse({"error": "missing_total"}, status_code=400)
     # Prefer the name captured at init if request did not include it
     name = name or meta.get("name") or "upload.bin"
+    description = description or meta.get("description")
 
     # Verify all parts exist before consuming any (missing part => client can retry)
     for i in range(total_chunks):
@@ -1108,6 +1144,7 @@ async def api_upload_chunk_complete(request: Request) -> JSONResponse:
         last_modified=last_modified,
         invite_token=invite_token,
         fingerprint=fingerprint,
+        description=description,
     )
 
 @app.post("/api/album/reset")
@@ -1247,6 +1284,18 @@ async def api_invites_create(request: Request) -> JSONResponse:
     max_uses = (body or {}).get("maxUses", 1)
     invite_password = (body or {}).get("password")
     expires_days = (body or {}).get("expiresDays")
+    uploader_name_enabled = (body or {}).get(
+        "uploaderNameEnabled",
+        get_uploader_name_settings()["enabled"],
+    )
+    uploader_name_prefix = (body or {}).get(
+        "uploaderNamePrefix",
+        get_uploader_name_settings()["prefix"],
+    )
+    if not isinstance(uploader_name_enabled, bool):
+        return JSONResponse({"error": "invalid_uploader_name_enabled"}, status_code=400)
+    if not isinstance(uploader_name_prefix, str) or len(uploader_name_prefix) > 500:
+        return JSONResponse({"error": "invalid_uploader_name_prefix"}, status_code=400)
     # Normalize max_uses
     try:
         max_uses = int(max_uses)
@@ -1284,16 +1333,20 @@ async def api_invites_create(request: Request) -> JSONResponse:
     try:
         conn = db.connect()
         cur = conn.cursor()
-        if pw_hash:
-            cur.execute(
-                "INSERT INTO invites (token, album_id, album_name, max_uses, expires_at, password_hash, owner_user_id, owner_email, owner_name, name) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (token, resolved_album_id, album_name, max_uses, expires_at, pw_hash, owner_user_id, owner_email, owner_name, default_link_name)
-            )
-        else:
-            cur.execute(
-                "INSERT INTO invites (token, album_id, album_name, max_uses, expires_at, owner_user_id, owner_email, owner_name, name) VALUES (?,?,?,?,?,?,?,?,?)",
-                (token, resolved_album_id, album_name, max_uses, expires_at, owner_user_id, owner_email, owner_name, default_link_name)
-            )
+        cur.execute(
+            """
+            INSERT INTO invites (
+                token, album_id, album_name, max_uses, expires_at, password_hash,
+                owner_user_id, owner_email, owner_name, name,
+                uploader_name_enabled, uploader_name_prefix
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                token, resolved_album_id, album_name, max_uses, expires_at, pw_hash,
+                owner_user_id, owner_email, owner_name, default_link_name,
+                int(uploader_name_enabled), uploader_name_prefix,
+            ),
+        )
         conn.commit()
         conn.close()
     except Exception as e:
@@ -1601,14 +1654,25 @@ async def api_invite_uploads(token: str, request: Request) -> JSONResponse:
 
 @app.get("/invite/{token}", response_class=HTMLResponse)
 async def invite_page(token: str, request: Request) -> HTMLResponse:
-    return FileResponse(os.path.join(FRONTEND_DIR, "invite.html"))
+    return FileResponse(
+        os.path.join(FRONTEND_DIR, "invite.html"),
+        headers={"Cache-Control": "no-store"},
+    )
 
 @app.get("/api/invite/{token}")
 async def api_invite_info(token: str, request: Request) -> JSONResponse:
     try:
         conn = db.connect()
         cur = conn.cursor()
-        cur.execute("SELECT token, album_id, album_name, max_uses, used_count, expires_at, COALESCE(claimed,0), claimed_at, password_hash, COALESCE(disabled,0), name FROM invites WHERE token = ?", (token,))
+        cur.execute(
+            """
+            SELECT token, album_id, album_name, max_uses, used_count, expires_at,
+                   COALESCE(claimed,0), claimed_at, password_hash,
+                   COALESCE(disabled,0), name, uploader_name_enabled, uploader_name_prefix
+            FROM invites WHERE token = ?
+            """,
+            (token,),
+        )
         row = cur.fetchone()
         conn.close()
     except Exception as e:
@@ -1616,7 +1680,12 @@ async def api_invite_info(token: str, request: Request) -> JSONResponse:
         return JSONResponse({"error": "db_error"}, status_code=500)
     if not row:
         return await immich_share_info(token, request)
-    _, album_id, album_name, max_uses, used_count, expires_at, claimed, claimed_at, password_hash, disabled, link_name = row
+    (
+        _, album_id, album_name, max_uses, used_count, expires_at, claimed,
+        claimed_at, password_hash, disabled, link_name, uploader_name_enabled,
+        uploader_name_prefix,
+    ) = row
+    defaults = get_uploader_name_settings()
     
     # If we have an album_id but no album_name, try to fetch it from Immich
     if album_id and not album_name:
@@ -1683,6 +1752,14 @@ async def api_invite_info(token: str, request: Request) -> JSONResponse:
         "albumId": album_id,
         "albumName": album_name,
         "name": link_name,
+        "uploaderNameEnabled": (
+            bool(uploader_name_enabled)
+            if uploader_name_enabled is not None
+            else defaults["enabled"]
+        ),
+        "uploaderNamePrefix": (
+            uploader_name_prefix if uploader_name_prefix is not None else defaults["prefix"]
+        ),
         "maxUses": max_uses,
         "used": used_count or 0,
         "remaining": remaining,

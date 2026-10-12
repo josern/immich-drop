@@ -51,6 +51,19 @@
         <div><label class="form-label">Expires in days</label><input id="days" type="number" min="0" placeholder="No expiry" class="input" /></div>
         <div><label class="form-label">Password (optional)</label><input id="password" type="password" placeholder="Set a password" class="input" autocomplete="off" /><div class="form-hint">Recipients must enter this before uploading.</div></div>
       </div>
+      <div class="card mt-3">
+        <div class="form-group">
+          <label class="flex gap-2 items-center">
+            <input id="uploaderNameEnabled" type="checkbox" checked />
+            <span class="form-label" style="margin:0;">Save the uploader name in EXIF Photographer and Immich description</span>
+          </label>
+        </div>
+        <div class="form-group">
+          <label for="uploaderNamePrefixSetting" class="form-label">Text before the name in Immich description</label>
+          <input id="uploaderNamePrefixSetting" class="input" type="text" maxlength="500" value="Photo taken by " placeholder="Photo taken by " />
+          <div class="form-hint">For example, “Photo taken by ” produces “Photo taken by Alex”.</div>
+        </div>
+      </div>
       <div class="mt-3"><button id="btnCreate" class="btn btn--primary">Create link</button></div>
       <div id="result" class="hidden mt-3">
         <div id="linkRow" class="flex gap-2" style="flex-wrap:wrap;"><input id="linkOut" class="input flex-1" readonly /><button id="btnCopy" type="button" class="btn">Copy</button></div>

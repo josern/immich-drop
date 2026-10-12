@@ -279,6 +279,8 @@ async function uploadWhole(next){
   form.append('item_id', next.id);
   form.append('session_id', sessionId);
   form.append('last_modified', next.file.lastModified || '');
+  const description = document.getElementById('uploaderName')?.value.trim();
+  if (description) form.append('description', description);
   if (INVITE_TOKEN) form.append('invite_token', INVITE_TOKEN);
   form.append('fingerprint', FINGERPRINT);
   let lastPct = -1;
@@ -320,6 +322,7 @@ async function uploadChunked(next){
       name: next.file.name,
       size: next.file.size,
       last_modified: next.file.lastModified || '',
+      description: document.getElementById('uploaderName')?.value.trim() || '',
       invite_token: INVITE_TOKEN || '',
       content_type: next.file.type || 'application/octet-stream',
       fingerprint: FINGERPRINT
@@ -356,6 +359,7 @@ async function uploadChunked(next){
     session_id: sessionId,
     name: next.file.name,
     last_modified: next.file.lastModified || '',
+    description: document.getElementById('uploaderName')?.value.trim() || '',
     invite_token: INVITE_TOKEN || '',
     content_type: next.file.type || 'application/octet-stream',
     fingerprint: FINGERPRINT,

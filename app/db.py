@@ -67,6 +67,8 @@ def init_db() -> None:
             "ALTER TABLE invites ADD COLUMN owner_name TEXT",
             "ALTER TABLE invites ADD COLUMN name TEXT",
             "ALTER TABLE invites ADD COLUMN disabled INTEGER DEFAULT 0",
+            "ALTER TABLE invites ADD COLUMN uploader_name_enabled INTEGER",
+            "ALTER TABLE invites ADD COLUMN uploader_name_prefix TEXT",
         ):
             try:
                 cur.execute(ddl)
@@ -99,8 +101,49 @@ def init_db() -> None:
             );
             """
         )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            """
+        )
+        cur.execute(
+            "INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)",
+            ("uploader_name_enabled", "1"),
+        )
+        cur.execute(
+            "INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)",
+            ("uploader_name_prefix", "Photo taken by "),
+        )
+        cur.execute(
+            """
+            UPDATE invites
+            SET uploader_name_enabled = CAST(
+                    (SELECT value FROM app_settings WHERE key = 'uploader_name_enabled') AS INTEGER
+                ),
+                uploader_name_prefix = (
+                    SELECT value FROM app_settings WHERE key = 'uploader_name_prefix'
+                )
+            WHERE uploader_name_enabled IS NULL
+            """
+        )
         conn.commit()
     except Exception as e:
         logger.exception("Failed to initialize state DB: %s", e)
     finally:
         conn.close()
+
+
+def get_setting(key: str, default: str = "") -> str:
+    """Read a persisted application setting."""
+    conn = connect()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM app_settings WHERE key = ?", (key,))
+        row = cur.fetchone()
+        return row[0] if row else default
+    finally:
+        conn.close()
+

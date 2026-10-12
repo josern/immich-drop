@@ -15,6 +15,7 @@ Admin users log in to create public invite links; invite links are always public
 - **Duplicate Prevention:** local SHA‑1 cache (+ optional Immich bulk-check)
 - **Progress Queue:** WebSocket updates; retry failed items
 - **Chunked Uploads (optional):** large-file support with configurable chunk size
+- **Uploader Name (per invite):** optionally save the name alone in JPEG EXIF Photographer/Artist, and the configured prefix plus name in Immich's description. Description updates require Immich asset-update permission; failures appear as upload warnings. Duplicate assets are left unchanged.
 - **Privacy-first:** never lists server media; session-local uploads only
 - **Mobile + Dark Mode:** responsive UI, safe-area padding, persistent theme
 - **URL Downloads:** download from TikTok, Instagram, Facebook, Reddit, YouTube, Twitter, Flickr, Imgur, Tumblr, Pinterest, and many more -- upload to Immich

@@ -71,6 +71,7 @@ class UploadOutcome:
     asset_id: Optional[str] = None
     status: str = ""  # "created" or "duplicate" on success
     error: Optional[str] = None
+    description_error: Optional[str] = None
 
 
 def _multipart_parts(fields: Dict[str, str], filename: str, content_type: str, boundary: str) -> tuple[bytes, bytes]:
@@ -99,6 +100,8 @@ async def upload_asset(
     checksum: str,
     created_at: Optional[datetime] = None,
     modified_at: Optional[datetime] = None,
+    description: Optional[str] = None,
+    description_headers: Optional[Dict[str, str]] = None,
     progress: Optional[Callable[[int], None]] = None,
     timeout: float = 300.0,
 ) -> UploadOutcome:
@@ -144,13 +147,47 @@ async def upload_asset(
         return UploadOutcome(ok=False, status_code=0, error=str(e))
     if r.status_code in (200, 201):
         data = r.json()
+        description_error = None
+        if description and data.get("status", "created") != "duplicate":
+            if data.get("id"):
+                description_error = await update_asset_description(
+                    client, base_url, description_headers or headers, data["id"], description
+                )
+            else:
+                description_error = "Immich did not return an asset ID"
         return UploadOutcome(
             ok=True,
             status_code=r.status_code,
             asset_id=data.get("id"),
             status=data.get("status", "created"),
+            description_error=description_error,
         )
     return UploadOutcome(ok=False, status_code=r.status_code, error=parse_error(r))
+
+
+async def update_asset_description(
+    client: httpx.AsyncClient,
+    base_url: str,
+    headers: Dict[str, str],
+    asset_id: str,
+    description: str,
+) -> Optional[str]:
+    """Return an explicit warning if a new asset's description cannot be saved."""
+    try:
+        response = await client.patch(
+            f"{base_url}/assets/{asset_id}",
+            headers={**headers, "Content-Type": "application/json"},
+            json={"description": description},
+            timeout=10.0,
+        )
+    except httpx.HTTPError as error:
+        logger.exception("Could not save description for asset %s", asset_id)
+        return str(error) or "request failed"
+    if response.status_code not in (200, 204):
+        error = parse_error(response)
+        logger.warning("Description update failed for asset %s: %s", asset_id, error)
+        return error
+    return None
 
 
 async def bulk_upload_check(client: httpx.AsyncClient, base_url: str, headers: Dict[str, str], checks: List[dict]) -> Dict[str, dict]:
