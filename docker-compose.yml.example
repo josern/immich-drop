@@ -1,30 +1,37 @@
 services:
   immich-drop:
-    build: .
+    image: josern88/immich-drop:latest
+    pull_policy: always
     container_name: immich-drop
     restart: unless-stopped
     ports:
       - "8080:8080"
 
     environment:
-      #immich drop server ip
-      IMMICH_BASE_URL: https://immich.example.com/api
-      IMMICH_API_KEY: ${IMMICH_API_KEY}
+      # Immich connection (must include /api)
+      IMMICH_BASE_URL: ${IMMICH_BASE_URL:-https://immich.example.com/api}
+      IMMICH_API_KEY: ${IMMICH_API_KEY:?Set IMMICH_API_KEY in your .env file}
 
-      PUBLIC_BASE_URL: https://drop.example.com
-      #Enable/Disable Public upload page to folder
-      PUBLIC_UPLOAD_PAGE_ENABLED: false
-      IMMICH_ALBUM_NAME: dead-drop
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://drop.example.com}
+      # Enable/disable the public upload page
+      PUBLIC_UPLOAD_PAGE_ENABLED: ${PUBLIC_UPLOAD_PAGE_ENABLED:-false}
+      IMMICH_ALBUM_NAME: ${IMMICH_ALBUM_NAME:-dead-drop}
+
       # Chunked uploads to bypass 100MB limits (e.g., Cloudflare Tunnel)
-      CHUNKED_UPLOADS_ENABLED: true
-      CHUNK_SIZE_MB: 95
-      # Instagram / gallery-dl anti-detection
-      GALLERY_DL_SLEEP_REQUEST: "10-25"
-      GALLERY_DL_SLEEP: "5-15"
-      GALLERY_DL_TIMEOUT: 300
-      DOWNLOAD_CONCURRENCY: 1
-      INSTAGRAM_YTDLP_FALLBACK: false
+      CHUNKED_UPLOADS_ENABLED: ${CHUNKED_UPLOADS_ENABLED:-true}
+      CHUNK_SIZE_MB: ${CHUNK_SIZE_MB:-95}
 
+      # Instagram / gallery-dl anti-detection
+      GALLERY_DL_SLEEP_REQUEST: ${GALLERY_DL_SLEEP_REQUEST:-10-25}
+      GALLERY_DL_SLEEP: ${GALLERY_DL_SLEEP:-5-15}
+      GALLERY_DL_TIMEOUT: ${GALLERY_DL_TIMEOUT:-300}
+      DOWNLOAD_CONCURRENCY: ${DOWNLOAD_CONCURRENCY:-1}
+      INSTAGRAM_YTDLP_FALLBACK: ${INSTAGRAM_YTDLP_FALLBACK:-false}
+
+      # Optional app config
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in your .env file}
+      TEST_CONNECTION_ENABLED: ${TEST_CONNECTION_ENABLED:-true}
+      TEST_CONNECTION_SHOW_HOSTNAME: ${TEST_CONNECTION_SHOW_HOSTNAME:-true}
 
     volumes:
       - immich_drop_data:/data

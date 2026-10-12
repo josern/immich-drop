@@ -54,7 +54,7 @@ version: "3.9"
 
 services:
   immich-drop:
-    image: ttlequals0/immich-drop:latest
+    image: josern88/immich-drop:latest
     pull_policy: always
     container_name: immich-drop
     restart: unless-stopped
